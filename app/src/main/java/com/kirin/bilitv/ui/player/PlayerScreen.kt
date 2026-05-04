@@ -885,7 +885,7 @@ fun PlayerScreen(
       }
 
       override fun onPlaybackStateChanged(playbackState: Int) {
-        if (playbackState == Player.STATE_ENDED) {
+        if (playbackState == Player.STATE_ENDED && playerState is PlayerScreenState.Ready && player.mediaItemCount > 0) {
           reportPlaybackCompleted()
         }
       }
@@ -922,7 +922,14 @@ fun PlayerScreen(
 
   LaunchedEffect(activeRequest, playbackCodecPreference, playbackQualityPreference, retryKey) {
     playerState = PlayerScreenState.Loading
+    completionActionToken += 1L
+    cancelPlaybackCompletionToast()
+    completionReported = false
     previewPositionMs = null
+    positionMs = 0L
+    durationMs = 0L
+    bufferedPercentage = 0L
+    playbackPaused = false
     currentCodecText = ""
     danmakuEntries = emptyList()
     airJumpSegments = emptyList()
@@ -930,7 +937,6 @@ fun PlayerScreen(
     skippedAirJumpIds = emptySet()
     lastAirJumpPositionMs = 0L
     playerActuallyPlaying = false
-    completionReported = false
     player.clearMediaItems()
     val videoMetadata = runCatching {
       playbackRepository.getVideoMetadata(activeRequest)
