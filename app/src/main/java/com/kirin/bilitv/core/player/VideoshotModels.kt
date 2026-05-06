@@ -16,15 +16,19 @@ data class VideoshotData(
 
   fun frameAt(positionMs: Long, durationMs: Long): VideoshotFrame? {
     if (images.isEmpty()) return null
+    val columns = imgXLen.coerceAtLeast(1)
+    val rows = imgYLen.coerceAtLeast(1)
     val frameIndex = frameIndexAt(positionMs, durationMs)
     val imageIndex = (frameIndex / framesPerImage).coerceIn(0, images.lastIndex)
     val frameInImage = frameIndex % framesPerImage
     return VideoshotFrame(
       imageUrl = images[imageIndex],
-      x = (frameInImage % imgXLen.coerceAtLeast(1)) * imgXSize,
-      y = (frameInImage / imgXLen.coerceAtLeast(1)) * imgYSize,
+      x = (frameInImage % columns) * imgXSize,
+      y = (frameInImage / columns) * imgYSize,
       width = imgXSize,
       height = imgYSize,
+      spriteWidth = columns * imgXSize,
+      spriteHeight = rows * imgYSize,
     )
   }
 
@@ -82,4 +86,6 @@ data class VideoshotFrame(
   val y: Int,
   val width: Int,
   val height: Int,
+  val spriteWidth: Int,
+  val spriteHeight: Int,
 )

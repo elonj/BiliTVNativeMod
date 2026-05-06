@@ -718,14 +718,18 @@ private fun VideoshotCroppedCanvas(
   modifier: Modifier = Modifier,
 ) {
   Canvas(modifier = modifier) {
-    val srcX = frame.x.coerceIn(0, (image.width - 1).coerceAtLeast(0))
-    val srcY = frame.y.coerceIn(0, (image.height - 1).coerceAtLeast(0))
-    val srcWidth = frame.width.coerceAtMost(image.width - srcX).coerceAtLeast(1)
-    val srcHeight = frame.height.coerceAtMost(image.height - srcY).coerceAtLeast(1)
+    val metadataSpriteWidth = frame.spriteWidth.coerceAtLeast(frame.width).coerceAtLeast(1)
+    val metadataSpriteHeight = frame.spriteHeight.coerceAtLeast(frame.height).coerceAtLeast(1)
+    val sourceScaleX = image.width.toFloat() / metadataSpriteWidth.toFloat()
+    val sourceScaleY = image.height.toFloat() / metadataSpriteHeight.toFloat()
+    val srcX = (frame.x * sourceScaleX).roundToInt().coerceIn(0, (image.width - 1).coerceAtLeast(0))
+    val srcY = (frame.y * sourceScaleY).roundToInt().coerceIn(0, (image.height - 1).coerceAtLeast(0))
+    val srcRight = ((frame.x + frame.width) * sourceScaleX).roundToInt().coerceIn(srcX + 1, image.width)
+    val srcBottom = ((frame.y + frame.height) * sourceScaleY).roundToInt().coerceIn(srcY + 1, image.height)
     drawImage(
       image = image,
       srcOffset = IntOffset(srcX, srcY),
-      srcSize = IntSize(srcWidth, srcHeight),
+      srcSize = IntSize(srcRight - srcX, srcBottom - srcY),
       dstOffset = IntOffset.Zero,
       dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
     )
