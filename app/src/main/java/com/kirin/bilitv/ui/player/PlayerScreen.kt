@@ -3,7 +3,6 @@ package com.kirin.bilitv.ui.player
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
-import android.graphics.BitmapFactory
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
@@ -38,7 +37,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -65,7 +63,6 @@ import com.kirin.bilitv.R
 import com.kirin.bilitv.core.model.VideoSummary
 import com.kirin.bilitv.core.model.isWatchCompleted
 import com.kirin.bilitv.core.model.shouldAdvanceToNextHistoryEpisode
-import com.kirin.bilitv.core.network.SpaceVideoRetryMode
 import com.kirin.bilitv.core.network.VideoRepository
 import com.kirin.bilitv.core.player.AirJumpSegment
 import com.kirin.bilitv.core.player.BiliMediaDataSourceFactory
@@ -299,18 +296,13 @@ fun PlayerScreen(
   }
 
   fun alignPreviewTarget(targetMs: Long, currentPreviewMs: Long?, deltaMs: Long, maxDurationMs: Long): Long {
-    val videoshot = videoshotData ?: return targetMs
-    if (!seekPreviewSpritesEnabled) return targetMs
-    var aligned = videoshot.closestTimestampMs(targetMs).coerceIn(0L, maxDurationMs)
-    if (currentPreviewMs != null && deltaMs > 0 && aligned <= currentPreviewMs && currentPreviewMs < maxDurationMs) {
-      aligned = videoshot.closestTimestampMs((currentPreviewMs + 1_000L).coerceIn(0L, maxDurationMs))
-        .coerceIn(0L, maxDurationMs)
-    }
-    if (currentPreviewMs != null && deltaMs < 0 && aligned >= currentPreviewMs && currentPreviewMs > 0L) {
-      aligned = videoshot.closestTimestampMs((currentPreviewMs - 1_000L).coerceIn(0L, maxDurationMs))
-        .coerceIn(0L, maxDurationMs)
-    }
-    return aligned
+    return videoshotData.alignPreviewTarget(
+      targetMs = targetMs,
+      currentPreviewMs = currentPreviewMs,
+      deltaMs = deltaMs,
+      maxDurationMs = maxDurationMs,
+      enabled = seekPreviewSpritesEnabled,
+    )
   }
 
   fun commitPreviewSeek(revealControls: Boolean = controlsVisible || progressFocused) {
@@ -521,16 +513,19 @@ fun PlayerScreen(
     sidePanelVideos = emptyList()
     sidePanelLoading = true
     focusedPanelIndex = defaultFocusedIndex
-    coroutineScope.launch {
-      val videos = runCatching { loader() }.getOrDefault(emptyList())
-      if (sidePanelLoadToken != loadToken || activePanel != panel) {
-        return@launch
-      }
-      sidePanelVideos = videos
-      sidePanelLoading = false
-      focusedPanelIndex = if (videos.isNotEmpty()) defaultFocusedIndex else 0
-      showControls()
-    }
+    coroutineScope.launchVideoListPanelLoad(
+      panel = panel,
+      loadToken = loadToken,
+      defaultFocusedIndex = defaultFocusedIndex,
+      loader = loader,
+      isCurrentLoad = { token, expectedPanel -> sidePanelLoadToken == token && activePanel == expectedPanel },
+      applyResult = { videos, focusedIndex ->
+        sidePanelVideos = videos
+        sidePanelLoading = false
+        focusedPanelIndex = focusedIndex
+      },
+      showControls = ::showControls,
+    )
   }
 
   fun openUpVideos(order: String = UpVideoOrderLatest) {
@@ -548,125 +543,38 @@ fun PlayerScreen(
     sidePanelVideos = cachedVideos
     sidePanelLoading = cachedVideos.isEmpty()
     focusedPanelIndex = if (cachedVideos.isNotEmpty()) UpPanelHeaderItemCount else UpFocusSort
-    coroutineScope.launch {
-      val resolvedMetadata = resolveDisplayMetadata()
-      val ownerMid = displayRequest.ownerMid.takeIf { it > 0L } ?: resolvedMetadata?.ownerMid ?: 0L
-      val cacheKey = upVideoCacheKey(ownerMid, order)
-      val resolvedCachedVideos = upVideoCache[cacheKey].orEmpty()
-        .withoutCurrentVideo(displayRequest)
-      Log.i(
-        PlayerUpVideosLogTag,
-        "resolved token=$loadToken bvid=${displayRequest.bvid} order=$order ownerMid=$ownerMid " +
-          "metadataMid=${resolvedMetadata?.ownerMid ?: 0L} cache=${resolvedCachedVideos.size}",
-      )
-      if (sidePanelLoadToken == loadToken && activePanel == PlayerPanel.UpVideos && resolvedCachedVideos.isNotEmpty()) {
+    coroutineScope.launchUpVideosPanelLoad(
+      loadToken = loadToken,
+      order = order,
+      initialRequest = displayRequest,
+      videoRepository = videoRepository,
+      resolveDisplayMetadata = ::resolveDisplayMetadata,
+      currentRequest = { displayRequest },
+      isCurrentUpVideosLoad = { token -> sidePanelLoadToken == token && activePanel == PlayerPanel.UpVideos },
+      currentLoadDescription = { "activeToken=$sidePanelLoadToken activePanel=$activePanel" },
+      readCachedVideos = { key -> upVideoCache[key].orEmpty() },
+      cacheVideos = { key, videos ->
+        upVideoCache = upVideoCache.withBoundedUpVideoEntry(key, videos)
+      },
+      applyResolvedCachedVideos = { resolvedCachedVideos ->
         sidePanelVideos = resolvedCachedVideos
         sidePanelLoading = false
         focusedPanelIndex = if (focusedPanelIndex < UpPanelHeaderItemCount) UpPanelHeaderItemCount else focusedPanelIndex
-        showControls()
-      }
-      val networkResult = if (ownerMid <= 0L) {
-        Log.w(PlayerUpVideosLogTag, "skip network token=$loadToken bvid=${displayRequest.bvid} order=$order: ownerMid=0")
-        Result.success(emptyList())
-      } else {
-        runCatching {
-          videoRepository.getSpaceVideos(
-            mid = ownerMid,
-            order = order,
-            retryMode = SpaceVideoRetryMode.Interactive,
-          )
+      },
+      applyLoadedVideos = { videos ->
+        sidePanelVideos = videos
+        sidePanelLoading = false
+        focusedPanelIndex = if (videos.isNotEmpty() && focusedPanelIndex < UpPanelHeaderItemCount) {
+          UpPanelHeaderItemCount
+        } else {
+          focusedPanelIndex.coerceIn(0, (UpPanelHeaderItemCount + videos.size - 1).coerceAtLeast(0))
         }
-      }
-      val videos = networkResult.onFailure { error ->
-          Log.w(
-            PlayerUpVideosLogTag,
-            "network failed token=$loadToken mid=$ownerMid order=$order bvid=${displayRequest.bvid}: ${error.toLogBrief()}",
-          )
-        }.getOrDefault(emptyList())
-      if (sidePanelLoadToken != loadToken || activePanel != PlayerPanel.UpVideos) {
-        Log.i(
-          PlayerUpVideosLogTag,
-          "discard token=$loadToken activeToken=$sidePanelLoadToken activePanel=$activePanel " +
-            "network=${videos.size}",
-        )
-        return@launch
-      }
-      val nextVideos = videos.ifEmpty { upVideoCache[cacheKey].orEmpty() }
-        .withoutCurrentVideo(displayRequest)
-      if (videos.isNotEmpty()) {
-        upVideoCache = upVideoCache.withBoundedEntry(cacheKey, videos)
-      }
-      Log.i(
-        PlayerUpVideosLogTag,
-        "apply token=$loadToken mid=$ownerMid order=$order network=${videos.size} next=${nextVideos.size} " +
-          "usedCacheFallback=${videos.isEmpty() && nextVideos.isNotEmpty()}",
-      )
-      sidePanelVideos = nextVideos
-      sidePanelLoading = false
-      focusedPanelIndex = if (nextVideos.isNotEmpty() && focusedPanelIndex < UpPanelHeaderItemCount) {
-        UpPanelHeaderItemCount
-      } else {
-        focusedPanelIndex.coerceIn(0, (UpPanelHeaderItemCount + nextVideos.size - 1).coerceAtLeast(0))
-      }
-      showControls()
-
-      if (ownerMid > 0L && videos.isEmpty() && networkResult.isFailure) {
-        coroutineScope.launch {
-          delay(UpVideosRecoveryRetryDelayMs)
-          if (sidePanelLoadToken != loadToken || activePanel != PlayerPanel.UpVideos) {
-            return@launch
-          }
-          val recoveryVideos = runCatching {
-            videoRepository.getSpaceVideos(
-              mid = ownerMid,
-              order = order,
-              retryMode = SpaceVideoRetryMode.Recovery,
-            )
-          }.onFailure { error ->
-            Log.w(
-              PlayerUpVideosLogTag,
-              "background retry failed token=$loadToken mid=$ownerMid order=$order bvid=${displayRequest.bvid}: ${error.toLogBrief()}",
-            )
-          }.getOrDefault(emptyList())
-          if (
-            recoveryVideos.isEmpty() ||
-            sidePanelLoadToken != loadToken ||
-            activePanel != PlayerPanel.UpVideos
-          ) {
-            return@launch
-          }
-          val recoveredVideos = recoveryVideos.withoutCurrentVideo(displayRequest)
-          if (recoveredVideos.isEmpty()) {
-            return@launch
-          }
-          upVideoCache = upVideoCache.withBoundedEntry(cacheKey, recoveryVideos)
-          Log.i(
-            PlayerUpVideosLogTag,
-            "background apply token=$loadToken mid=$ownerMid order=$order network=${recoveryVideos.size} " +
-              "next=${recoveredVideos.size}",
-          )
-          sidePanelVideos = recoveredVideos
-          sidePanelLoading = false
-          focusedPanelIndex = if (focusedPanelIndex < UpPanelHeaderItemCount) {
-            UpPanelHeaderItemCount
-          } else {
-            focusedPanelIndex.coerceIn(0, (UpPanelHeaderItemCount + recoveredVideos.size - 1).coerceAtLeast(0))
-          }
-          showControls()
-        }
-      }
-
-      val followed = runCatching {
-        videoRepository.checkFollowStatus(ownerMid)
-      }.onFailure { error ->
-        Log.w(PlayerUpVideosLogTag, "follow check failed token=$loadToken mid=$ownerMid: ${error.toLogBrief()}")
-      }.getOrDefault(false)
-      if (sidePanelLoadToken != loadToken || activePanel != PlayerPanel.UpVideos) {
-        return@launch
-      }
-      upFollowed = followed
-      showControls()
-    }
+      },
+      applyFollowed = { followed ->
+        upFollowed = followed
+      },
+      showControls = ::showControls,
+    )
   }
 
   fun toggleUpOrder() {
@@ -743,22 +651,6 @@ fun PlayerScreen(
     controlsVisible = false
   }
 
-  fun nextEpisodeRequest(videoMetadata: PlaybackVideoMetadata?): PlaybackRequest? {
-    val pages = videoMetadata?.pages.orEmpty()
-    val currentIndex = pages.indexOfFirst { episode ->
-      episode.cid == displayRequest.cid || (displayRequest.historyPage > 0 && episode.page == displayRequest.historyPage)
-    }
-    val nextEpisode = pages.getOrNull(currentIndex + 1) ?: return null
-    return displayRequest.copy(
-      cid = nextEpisode.cid,
-      startPositionMs = 0L,
-      preferredQualityId = selectedQuality?.id,
-      forceStartPosition = true,
-      historyPage = nextEpisode.page,
-      advanceToNextHistoryEpisode = false,
-    )
-  }
-
   fun scheduleCompletionAction() {
     completionActionJob?.cancel()
     val actionToken = ++completionActionToken
@@ -767,19 +659,20 @@ fun PlayerScreen(
         if (autoPlayNextEpisode) {
           val videoMetadata = resolveDisplayMetadata()
           if (completionActionToken != actionToken || !completionReported) return@launch
-          val nextRequest = nextEpisodeRequest(videoMetadata)
-          if (nextRequest != null) {
-            val nextTitle = videoMetadata?.pages
-              ?.firstOrNull { episode -> episode.cid == nextRequest.cid }
-              ?.title
-              .orEmpty()
-              .ifBlank { nextRequest.title }
+          val nextEpisode = displayRequest.nextEpisodeCompletion(
+            metadata = videoMetadata,
+            selectedQualityId = selectedQuality?.id,
+          )
+          if (nextEpisode != null) {
             showPlaybackCompletionToast(
-              context.getString(R.string.player_completion_next_episode_toast, textConverter.convert(nextTitle)),
+              context.getString(
+                R.string.player_completion_next_episode_toast,
+                textConverter.convert(nextEpisode.title),
+              ),
             )
             delay(CompletionActionDelayMs)
             if (completionActionToken == actionToken && completionReported) {
-              startPlaybackRequest(nextRequest, clearMetadata = false)
+              startPlaybackRequest(nextEpisode.request, clearMetadata = false)
             }
             return@launch
           }
@@ -788,7 +681,7 @@ fun PlayerScreen(
         if (autoPlayRelatedVideo) {
           val relatedVideo = runCatching {
             videoRepository.getRelatedVideos(displayRequest.bvid)
-              .firstOrNull { video -> !video.bvid.equals(displayRequest.bvid, ignoreCase = true) }
+              .firstCompletionRelatedVideo(displayRequest.bvid)
           }.getOrNull()
           if (completionActionToken != actionToken || !completionReported) return@launch
           if (relatedVideo != null) {
@@ -1253,14 +1146,12 @@ fun PlayerScreen(
   LaunchedEffect(seekPreviewSpritesEnabled, videoshotData?.images, previewPositionMs, playbackDurationState.longValue) {
     val data = videoshotData ?: return@LaunchedEffect
     if (!seekPreviewSpritesEnabled) return@LaunchedEffect
-    val currentDurationMs = playbackDurationState.longValue
-
-    val targetUrls = buildList {
-      data.frameAt(previewPositionMs ?: playbackPositionState.longValue, currentDurationMs)?.imageUrl?.let(::add)
-      data.images.take(VideoshotPreloadImageCount).forEach(::add)
-    }
-      .filter { url -> url.isNotBlank() && url !in videoshotSprites }
-      .distinct()
+    val targetUrls = data.previewSpriteUrls(
+      previewPositionMs = previewPositionMs,
+      playbackPositionMs = playbackPositionState.longValue,
+      durationMs = playbackDurationState.longValue,
+      cachedUrls = videoshotSprites.keys,
+    )
 
     targetUrls.forEach { url ->
       val image = runCatching {
@@ -1644,11 +1535,6 @@ private fun PlaybackVideoMetadata?.hasEpisodeCid(cid: Long): Boolean {
   return pages.isEmpty() || pages.any { episode -> episode.cid == cid }
 }
 
-private fun List<VideoSummary>.withoutCurrentVideo(request: PlaybackRequest): List<VideoSummary> {
-  if (request.bvid.isBlank()) return this
-  return filterNot { video -> video.bvid.equals(request.bvid, ignoreCase = true) }
-}
-
 private fun PlaybackRequest.withResolvedMetadata(
   metadata: PlaybackVideoMetadata?,
   cid: Long,
@@ -1679,38 +1565,6 @@ private fun String.codecLabelFromCodecs(): String? {
   }
 }
 
-private fun ByteArray.decodeImageBitmapOrNull(): ImageBitmap? {
-  return BitmapFactory.decodeByteArray(this, 0, size)?.asImageBitmap()
-}
-
-private fun upVideoCacheKey(ownerMid: Long, order: String): String {
-  return "$ownerMid:$order"
-}
-
-private fun Map<String, List<VideoSummary>>.withBoundedEntry(
-  key: String,
-  videos: List<VideoSummary>,
-): Map<String, List<VideoSummary>> {
-  val nextEntries = (this - key).toMutableMap()
-  nextEntries[key] = videos.take(MaxUpVideoCacheVideosPerKey)
-  return nextEntries.entries
-    .toList()
-    .takeLast(MaxUpVideoCacheKeys)
-    .associate { entry -> entry.key to entry.value }
-}
-
-private fun Map<String, ImageBitmap>.withBoundedSprite(
-  key: String,
-  image: ImageBitmap,
-): Map<String, ImageBitmap> {
-  val nextEntries = (this - key).toMutableMap()
-  nextEntries[key] = image
-  return nextEntries.entries
-    .toList()
-    .takeLast(MaxVideoshotSpriteCacheEntries)
-    .associate { entry -> entry.key to entry.value }
-}
-
 private tailrec fun Context.findActivity(): Activity? {
   return when (this) {
     is Activity -> this
@@ -1730,10 +1584,6 @@ private fun Context.createPlayerWakeLock(): PowerManager.WakeLock? {
   }
 }
 
-private fun Throwable.toLogBrief(): String {
-  return "${javaClass.simpleName}: ${message.orEmpty()}"
-}
-
 private sealed interface PlayerScreenState {
   data object Loading : PlayerScreenState
   data class Ready(val info: PlaybackInfo) : PlayerScreenState
@@ -1742,8 +1592,6 @@ private sealed interface PlayerScreenState {
 
 private const val SeekStepMs = 10_000L
 private const val OnlineCountRefreshMs = 60_000L
-private const val VideoshotPreloadImageCount = 2
-private const val MaxVideoshotSpriteCacheEntries = 6
 private const val ExitConfirmWindowMs = 3_000L
 private const val CompletedProgressSeconds = -1
 private const val CompletionActionDelayMs = 3_000L
@@ -1752,10 +1600,6 @@ private const val AirJumpWarningLeadMs = 3_500L
 private const val AirJumpCompletionToastSuppressMs = 1_500L
 private const val AirJumpRewindResetThresholdMs = 2_000L
 private const val AirJumpRewindResetLeadMs = 1_000L
-private const val MaxUpVideoCacheKeys = 4
-private const val MaxUpVideoCacheVideosPerKey = 50
-private const val UpVideosRecoveryRetryDelayMs = 1_200L
-private const val PlayerUpVideosLogTag = "BiliTVNative:UpVideos"
 private const val PlayerDanmakuLogTag = "BiliTVNative:Danmaku"
 private val DanmakuOpacityOptions = listOf(0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f)
 private val DanmakuFontSizeOptions = listOf(16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36)

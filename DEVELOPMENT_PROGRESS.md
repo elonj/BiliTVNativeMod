@@ -235,6 +235,14 @@
 | P8-09 | 根目录 3 个 MD 一致性修正 | Done | 本轮只更新 `AGENTS.md`、`DEVELOPMENT_PLAN.md` 和 `DEVELOPMENT_PROGRESS.md`，删除或改写过期的 `feature/*`、Compose Navigation、Coil 3、Room/Koin 默认推荐和常驻播放器诊断 HUD 说法；`README.md` 未改动 |
 | P8-10 | UP 主面板头部按钮焦点修正 | Done | “最新发布/最热门”和“关注/已关注”不再使用整块粉色实心底作为选中态，改为粉色文字/细边表达选中；焦点态使用白色高亮边框和播放器面板焦点底，避免粉底下焦点不可见；`assembleRelease -PtargetAbi=armeabi-v7a` 通过 |
 | P8-11 | UP 主更多视频间歇加载失败诊断 | Done | 在 `PlayerScreen` 和 `VideoRepository` 增加脱敏日志，记录打开 UP 主面板、mid 解析、缓存命中、space 接口签名/刷新/回退、空 vlist、网络失败和过期 token 丢弃；不打印 Cookie/token；`assembleRelease -PtargetAbi=armeabi-v7a` 通过 |
-| P8-12 | UP 主更多视频 412 风控修复 | Done | 参考 BiliPai 的空间接口处理：UP 投稿请求回到 `mid/pn/ps/order` 基础参数，WBI API 不再强行补 Referer；新增 `buvid3/buvid4` 持久化、SPI 获取和激活请求，空间投稿 Cookie 同时携带登录态与 buvid；412/429/5xx 使用退避重试；`assembleRelease -PtargetAbi=armeabi-v7a` 通过并已安装 `192.168.1.131:5555`，等待实机再次触发验证 |
 | P8-13 | UP 主更多视频 412 加载体验优化 | Done | 将空间投稿加载拆成 `Interactive` 和 `Recovery` 两种重试模式：前台面板只做一次 600ms 短重试，失败后立即结束 loading 并保留缓存/空态；后台 1.2s 后再做恢复重试，成功且仍停留在同一 UP 面板时再刷新列表，避免 412 退避把侧栏卡住数秒；`assembleRelease -PtargetAbi=armeabi-v7a` 通过，已安装并启动 `192.168.1.131:5555` |
 | P8-14 | UP 投稿接口对齐网页抓包 | Done | 根据网页端 `x/space/wbi/arc/search` 抓包同步最新发布/最多播放请求：参数改为 `ps=25,index=1,order_avoided=true,platform=web,web_location=333.1387`，请求头使用 `space.bilibili.com/{mid}` Referer/Origin、Chrome 147 UA、sec-ch-ua/priority/fetch 头，并在 Cookie 中补充登录 mid 对应的 `DedeUserID`；`assembleRelease -PtargetAbi=armeabi-v7a` 通过，已安装并启动 `192.168.1.131:5555` |
+
+## P9 重构拆分收尾
+
+| ID | 任务 | 状态 | 验收/备注 |
+| --- | --- | --- | --- |
+| P9-01 | 播放仓库职责拆分 | Done | 将弹幕 XML 获取/解压/解析拆到 `DanmakuRepository`，雪碧图元数据和图片字节获取拆到 `VideoshotRepository`，空降助手 SponsorBlock 请求拆到 `AirJumpRepository`；`PlaybackRepository` 保留播放地址、元数据、在线人数和播放进度职责；`assembleDebug` 通过 |
+| P9-02 | 播放器页面逻辑拆分 | Done | 将播放器侧栏视频加载、UP 主缓存和恢复重试拆到 `PlayerSidePanelLoader`；将播放完成后的下一集/相关视频选择规则拆到 `PlayerCompletionPlanner`；将快进预览雪碧图时间对齐、预加载 URL、解码和缓存裁剪拆到 `PlayerVideoshotPreview`；保留 ExoPlayer 生命周期、D-pad 主循环和弹幕/Surface 叠层不动；`assembleDebug` 通过 |
+| P9-03 | 视频数据仓库按业务域拆分 | Done | `VideoRepository` 保留对外门面和关注/取消关注，首页/热门/分区/相关推荐拆到 `HomeVideoRepository`，搜索和搜索建议拆到 `SearchVideoRepository`，UP 空间投稿/WBI/buvid/412 恢复策略拆到 `SpaceVideoRepository`，动态和历史拆到 `UserFeedRepository`，JSON 到 `VideoSummary` 的映射集中到 `VideoSummaryMappers`；`assembleDebug` 通过 |
+| P9-04 | 设置页和应用壳 UI 拆分 | Done | 设置页右侧主页栏目/About 面板拆到 `SettingsRightPanels`，设置行和显示文案拆到 `SettingsRows`，设置焦点入口/方向键边界/滚动辅助拆到 `SettingsFocus`；应用左侧导航栏、账号头像和导航按钮拆到 `AppSidebar`；`SettingsScreen` 降到约 646 行，`AppShell` 保留应用级状态、页面切换、播放入口和播放器叠层；`assembleDebug` 通过 |
