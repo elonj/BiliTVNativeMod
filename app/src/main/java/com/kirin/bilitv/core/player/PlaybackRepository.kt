@@ -110,9 +110,11 @@ class PlaybackRepository(
   }
 
   suspend fun getVideoMetadata(request: PlaybackRequest): PlaybackVideoMetadata {
+    val sessData = sessionStore.sessData.first()
     val root = apiClient.getJson(
       url = BiliApiEndpoints.View,
       params = mapOf("bvid" to request.bvid),
+      sessData = sessData,
     ).rootObject()
     root.requireBiliCodeOk("view metadata")
 
