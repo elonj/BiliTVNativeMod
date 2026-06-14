@@ -414,6 +414,17 @@ fun PlayerScreen(
       cid = state.info.cid,
       progressSeconds = progressSeconds,
     )
+    // 同时上报历史记录进度，实现跨设备进度同步
+    val reportAid = metadata?.aid?.takeIf { it > 0L }
+      ?: activeRequest.aid.takeIf { it > 0L }
+      ?: 0L
+    if (reportAid > 0L) {
+      playbackRepository.reportHistory(
+        aid = reportAid,
+        cid = state.info.cid,
+        progressSeconds = progressSeconds,
+      )
+    }
   }
 
   suspend fun saveAndReportProgressNow(overrideProgressSeconds: Int? = null) {

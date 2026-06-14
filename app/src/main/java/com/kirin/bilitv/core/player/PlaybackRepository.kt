@@ -238,6 +238,50 @@ class PlaybackRepository(
     }.getOrDefault(false)
   }
 
+  /**
+   * 上报视频观看进度到 B 站历史记录 ([BiliApiEndpoints.HistoryReport]).
+   *
+   * 与 [reportProgress]（心跳）不同，此接口持久化保存观看进度到用户的历史记录，
+   * 使得用户在其它设备上能看到"看到 xx 分钟"的进度。
+   *
+   * @param aid 视频 aid（必须 > 0）
+   * @param cid 视频 cid（必须 > 0）
+   * @param progressSeconds 观看进度，单位：**秒**
+   * @param type 投稿类型，3=普通视频，可选
+   * @param platform 平台标识，默认 "android"
+   * @return true 上报成功，false 因未登录或网络失败
+   */
+  suspend fun reportHistory(
+    aid: Long,
+    cid: Long,
+    progressSeconds: Int,
+    type: Int = 3,
+    platform: String = "android",
+  ): Boolean {
+    if (aid <= 0L || cid <= 0L) return false
+    val sessData = sessionStore.sessData.first()
+    val biliJct = sessionStore.biliJct.first()
+    if (sessData.isNullOrBlank() || biliJct.isNullOrBlank()) return false
+
+    return runCatching {
+      val root = apiClient.postFormJson(
+        url = BiliApiEndpoints.HistoryReport,
+        params = mapOf(
+          "aid" to aid.toString(),
+          "cid" to cid.toString(),
+          "progress" to progressSeconds.toString(),
+          "type" to type.toString(),
+          "platform" to platform,
+          "csrf" to biliJct,
+        ),
+        sessData = sessData,
+        biliJct = biliJct,
+      ).rootObject()
+      root.requireBiliCodeOk("history report")
+      true
+    }.getOrDefault(false)
+  }
+
   private fun parsePlaybackInfo(
     request: PlaybackRequest,
     headers: BiliPlaybackHeaders,

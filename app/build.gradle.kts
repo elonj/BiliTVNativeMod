@@ -31,6 +31,7 @@ android {
 
   buildTypes {
     debug {
+      applicationIdSuffix = ".kirinmod"
       isMinifyEnabled = false
       isShrinkResources = false
     }
