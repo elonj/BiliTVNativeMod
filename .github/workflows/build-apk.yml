@@ -43,7 +43,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      # 1. 编译前先 clean，彻底干掉旧的、冲突的遗留 APK 缓存
+      # 编译前先 clean，确保不漏掉、不混淆任何新代码和旧缓存
       - name: Build debug APK
         run: |
           chmod +x gradlew
@@ -53,24 +53,22 @@ jobs:
             ./gradlew clean :app:assembleDebug
           fi
 
-      # 2. 精准复制：Android 标准的 Debug APK 输出路径就是 app/build/outputs/apk/debug/
+      # 采用轰炸式全局搜索，彻底解决多模块项目下 APK 路径奇葩的问题
       - name: Locate and stage APK
         run: |
           mkdir -p apk-output
           
-          # 1. 全局轰炸式搜索所有以 .apk 结尾的文件，不管它在哪个三级、四级子目录下
           echo "==== 正在全局搜索生成的 APK 文件 ===="
           find . -name "*.apk" -type f
           
-          # 2. 将找到的所有 APK 统统复制到输出目录
+          echo "==== 开始复制所有生成的 APK 到输出目录 ===="
           find . -name "*.apk" -type f -exec cp {} apk-output/ \;
           
-          # 3. 检查到底捞到了没有
           if [ -z "$(ls -A apk-output)" ]; then
-            echo "❌ 全局都没找到任何 APK 文件，编译可能没真正产出"
+            echo "❌ 错误：全局未找到任何生成的 APK 文件，请检查编译日志是否成功产出。"
             exit 1
           else
-            echo "✅ 成功捞到以下 APK："
+            echo "✅ 成功捞到以下 APK 并准备上传："
             ls -l apk-output/
           fi
 
