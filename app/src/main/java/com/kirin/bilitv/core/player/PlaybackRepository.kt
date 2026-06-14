@@ -147,6 +147,7 @@ class PlaybackRepository(
       danmakuCount = BiliNumberParser.toInt(stat?.get("danmaku")),
       pubdate = data.long("pubdate"),
       pages = pages,
+      historyProgressSeconds = data.obj("history")?.int("progress")?.coerceAtLeast(0) ?: 0,
     )
   }
 
