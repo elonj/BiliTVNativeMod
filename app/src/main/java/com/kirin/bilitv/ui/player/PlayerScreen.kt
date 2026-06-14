@@ -1017,8 +1017,15 @@ fun PlayerScreen(
         val requestedStartPositionMs = if (resolvedRequest.preferredQualityId != null || resolvedRequest.forceStartPosition) {
           resolvedRequest.startPositionMs
         } else {
-          playbackRepository.getSavedProgress(info.bvid, info.cid)?.positionMs
-            ?: resolvedRequest.startPositionMs
+          // 优先级：云端进度（跨设备）> 本地进度（本 TV）> 默认
+          val cloudProgressMs = videoMetadata?.historyProgressSeconds?.takeIf { it > 0 }
+            ?.times(1000L) ?: 0L
+          if (cloudProgressMs > 0L) {
+            cloudProgressMs
+          } else {
+            playbackRepository.getSavedProgress(info.bvid, info.cid)?.positionMs
+              ?: resolvedRequest.startPositionMs
+          }
         }
         val startPositionMs = requestedStartPositionMs
         val mediaSource = DashMediaSource.Factory(
