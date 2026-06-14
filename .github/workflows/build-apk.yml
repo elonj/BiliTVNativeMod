@@ -57,19 +57,22 @@ jobs:
       - name: Locate and stage APK
         run: |
           mkdir -p apk-output
-          if [ -d "app/build/outputs/apk/debug" ]; then
-            cp app/build/outputs/apk/debug/*.apk apk-output/
+          
+          # 1. 全局轰炸式搜索所有以 .apk 结尾的文件，不管它在哪个三级、四级子目录下
+          echo "==== 正在全局搜索生成的 APK 文件 ===="
+          find . -name "*.apk" -type f
+          
+          # 2. 将找到的所有 APK 统统复制到输出目录
+          find . -name "*.apk" -type f -exec cp {} apk-output/ \;
+          
+          # 3. 检查到底捞到了没有
+          if [ -z "$(ls -A apk-output)" ]; then
+            echo "❌ 全局都没找到任何 APK 文件，编译可能没真正产出"
+            exit 1
           else
-            # 兜底逻辑：如果模块名不叫 app，再用安全路径查找
-            apk=$(find . -name "*debug*.apk" -path "*/outputs/apk/*" 2>/dev/null | head -1)
-            if [ -n "$apk" ]; then
-              cp "$apk" apk-output/
-            else
-              echo "Standard Debug APK not found"
-              exit 1
-            fi
+            echo "✅ 成功捞到以下 APK："
+            ls -l apk-output/
           fi
-          echo "APK staged: $(ls apk-output/)"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
