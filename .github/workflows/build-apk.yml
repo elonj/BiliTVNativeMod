@@ -45,6 +45,7 @@ jobs:
 
       - name: Build debug APK
         run: |
+          chmod +x gradlew
           if [ -n "${{ github.event.inputs.abi }}" ]; then
             ./gradlew :app:assembleDebug -PtargetAbi=${{ github.event.inputs.abi }}
           else
