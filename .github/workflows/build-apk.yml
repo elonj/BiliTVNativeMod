@@ -52,9 +52,23 @@ jobs:
             ./gradlew :app:assembleDebug
           fi
 
+      - name: Locate and stage APK
+        run: |
+          apk=$(find ~/.gradle/bilitv-native-build -name "*.apk" 2>/dev/null | head -1)
+          if [ -z "$apk" ]; then
+            apk=$(find /home/runner -name "*.apk" -path "*/outputs/*" 2>/dev/null | head -1)
+          fi
+          if [ -z "$apk" ]; then
+            echo "APK not found after build"
+            exit 1
+          fi
+          mkdir -p apk-output
+          cp "$apk" apk-output/
+          echo "APK staged: $(ls apk-output/)"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: bilitv-native-apk-${{ github.sha }}
-          path: app/build/outputs/apk/**/*.apk
+          path: apk-output/*.apk
           if-no-files-found: error
