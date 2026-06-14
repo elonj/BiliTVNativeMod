@@ -56,6 +56,7 @@ jobs:
         run: |
           apk=$(find ~/.gradle/bilitv-native-build -name "*.apk" 2>/dev/null | head -1)
           if [ -z "$apk" ]; then
+            # fallback: search wider
             apk=$(find /home/runner -name "*.apk" -path "*/outputs/*" 2>/dev/null | head -1)
           fi
           if [ -z "$apk" ]; then

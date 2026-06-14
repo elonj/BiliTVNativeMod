@@ -47,6 +47,8 @@ data class PlaybackVideoMetadata(
   val danmakuCount: Int,
   val pubdate: Long,
   val pages: List<PlaybackEpisode>,
+  /** 云端历史记录进度（秒），来自 View API 的 data.history.progress，0 表示无 */
+  val historyProgressSeconds: Int = 0,
 )
 
 data class PlaybackEpisode(
