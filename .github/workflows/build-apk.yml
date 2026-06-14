@@ -43,28 +43,32 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
+      # 1. 编译前先 clean，彻底干掉旧的、冲突的遗留 APK 缓存
       - name: Build debug APK
         run: |
           chmod +x gradlew
           if [ -n "${{ github.event.inputs.abi }}" ]; then
-            ./gradlew :app:assembleDebug -PtargetAbi=${{ github.event.inputs.abi }}
+            ./gradlew clean :app:assembleDebug -PtargetAbi=${{ github.event.inputs.abi }}
           else
-            ./gradlew :app:assembleDebug
+            ./gradlew clean :app:assembleDebug
           fi
 
+      # 2. 精准复制：Android 标准的 Debug APK 输出路径就是 app/build/outputs/apk/debug/
       - name: Locate and stage APK
         run: |
-          apk=$(find ~/.gradle/bilitv-native-build -name "*.apk" 2>/dev/null | head -1)
-          if [ -z "$apk" ]; then
-            # fallback: search wider
-            apk=$(find /home/runner -name "*.apk" -path "*/outputs/*" 2>/dev/null | head -1)
-          fi
-          if [ -z "$apk" ]; then
-            echo "APK not found after build"
-            exit 1
-          fi
           mkdir -p apk-output
-          cp "$apk" apk-output/
+          if [ -d "app/build/outputs/apk/debug" ]; then
+            cp app/build/outputs/apk/debug/*.apk apk-output/
+          else
+            # 兜底逻辑：如果模块名不叫 app，再用安全路径查找
+            apk=$(find . -name "*debug*.apk" -path "*/outputs/apk/*" 2>/dev/null | head -1)
+            if [ -n "$apk" ]; then
+              cp "$apk" apk-output/
+            else
+              echo "Standard Debug APK not found"
+              exit 1
+            fi
+          fi
           echo "APK staged: $(ls apk-output/)"
 
       - name: Upload APK
