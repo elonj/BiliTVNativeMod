@@ -5,7 +5,6 @@ import com.kirin.bilitv.core.auth.WbiKeyRepository
 import com.kirin.bilitv.core.auth.WbiSigner
 import com.kirin.bilitv.core.network.BiliApiClient
 import com.kirin.bilitv.core.network.BiliApiEndpoints
-import com.kirin.bilitv.core.network.BiliHeaders
 import com.kirin.bilitv.core.network.BiliNumberParser
 import com.kirin.bilitv.core.network.asObjectOrNull
 import com.kirin.bilitv.core.network.int
@@ -110,26 +109,55 @@ class PlaybackRepository(
         ?.long("cid") ?: 0L)
   }
 
-  suspend fun getVideoMetadata(request: PlaybackRequest): PlaybackVideoMetadata {
+  /**
+   * 从历史游标 API 查找指定视频的云端进度（秒），未找到或未登录返回 0。
+   * 优先查首页；若首页未命中则翻页最多 5 页。
+   */
+  suspend fun getCloudProgress(bvid: String): Int {
+    if (bvid.isBlank()) return 0
     val sessData = sessionStore.sessData.first()
-    val biliJct = sessionStore.biliJct.first()
-    val buvid3 = sessionStore.buvid3.first()
-    val buvid4 = sessionStore.buvid4.first()
-    val cookie = BiliHeaders.cookie(
-      sessData = sessData,
-      biliJct = biliJct,
-      buvid3 = buvid3,
-      buvid4 = buvid4,
-    )
-    val headers = buildMap {
-      put("User-Agent", BiliHeaders.UserAgent)
-      put("Referer", BiliHeaders.Referer)
-      cookie?.let { put("Cookie", it) }
+    if (sessData.isNullOrBlank()) return 0
+
+    var viewAt = 0L
+    var max = 0L
+    var pages = 0
+    while (pages < 5) {
+      val root = apiClient.getJson(
+        url = BiliApiEndpoints.HistoryCursor,
+        params = buildMap {
+          put("ps", HistoryLookupPageSize.toString())
+          if (viewAt > 0L) put("view_at", viewAt.toString())
+          if (max > 0L) put("max", max.toString())
+        },
+        sessData = sessData,
+      ).rootObject()
+      val code = root.int("code")
+      if (code != 0) break
+      val data = root.obj("data") ?: break
+      val list = data["list"] as? kotlinx.serialization.json.JsonArray ?: break
+      for (element in list) {
+        val item = element.asObjectOrNull() ?: continue
+        val history = item.obj("history")
+        val itemBvid = history?.string("bvid").orEmpty()
+        if (itemBvid == bvid) {
+          return item.int("progress").takeIf { it > 0 } ?: 0
+        }
+      }
+      val cursor = data.obj("cursor") ?: break
+      val nextViewAt = cursor.long("view_at")
+      val nextMax = cursor.long("max")
+      if (nextViewAt <= 0L && nextMax <= 0L) break
+      viewAt = nextViewAt
+      max = nextMax
+      pages++
     }
-    val root = apiClient.getJsonWithHeaders(
+    return 0
+  }
+
+  suspend fun getVideoMetadata(request: PlaybackRequest): PlaybackVideoMetadata {
+    val root = apiClient.getJson(
       url = BiliApiEndpoints.View,
       params = mapOf("bvid" to request.bvid),
-      headers = headers,
     ).rootObject()
     root.requireBiliCodeOk("view metadata")
 
@@ -468,5 +496,6 @@ class PlaybackRepository(
     const val FnvalH265 = 64
     const val FnvalAv1 = 1024
     const val PlaybackLogTag = "BiliTVNative:Playback"
+    const val HistoryLookupPageSize = 20
   }
 }
