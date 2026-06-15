@@ -19,8 +19,8 @@ android {
     applicationId = "com.kirin.bilitv"
     minSdk = 23
     targetSdk = 36
-    versionCode = 103
-    versionName = "1.0.3"
+    versionCode = 110
+    versionName = "1.1.0-syncmod"
 
     ndk {
       abiFilters.clear()
@@ -31,7 +31,7 @@ android {
 
   buildTypes {
     debug {
-      applicationIdSuffix = ".kirinmod"
+      applicationIdSuffix = ".syncmod"
       isMinifyEnabled = false
       isShrinkResources = false
     }
