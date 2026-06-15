@@ -5,6 +5,7 @@ import com.kirin.bilitv.core.auth.WbiKeyRepository
 import com.kirin.bilitv.core.auth.WbiSigner
 import com.kirin.bilitv.core.network.BiliApiClient
 import com.kirin.bilitv.core.network.BiliApiEndpoints
+import com.kirin.bilitv.core.network.BiliHeaders
 import com.kirin.bilitv.core.network.BiliNumberParser
 import com.kirin.bilitv.core.network.asObjectOrNull
 import com.kirin.bilitv.core.network.int
@@ -111,10 +112,24 @@ class PlaybackRepository(
 
   suspend fun getVideoMetadata(request: PlaybackRequest): PlaybackVideoMetadata {
     val sessData = sessionStore.sessData.first()
-    val root = apiClient.getJson(
+    val biliJct = sessionStore.biliJct.first()
+    val buvid3 = sessionStore.buvid3.first()
+    val buvid4 = sessionStore.buvid4.first()
+    val cookie = BiliHeaders.cookie(
+      sessData = sessData,
+      biliJct = biliJct,
+      buvid3 = buvid3,
+      buvid4 = buvid4,
+    )
+    val headers = buildMap {
+      put("User-Agent", BiliHeaders.UserAgent)
+      put("Referer", BiliHeaders.Referer)
+      cookie?.let { put("Cookie", it) }
+    }
+    val root = apiClient.getJsonWithHeaders(
       url = BiliApiEndpoints.View,
       params = mapOf("bvid" to request.bvid),
-      sessData = sessData,
+      headers = headers,
     ).rootObject()
     root.requireBiliCodeOk("view metadata")
 
