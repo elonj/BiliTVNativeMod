@@ -113,6 +113,51 @@ class PlaybackRepository(
         ?.long("cid") ?: 0L)
   }
 
+  /**
+   * 从历史游标 API 查找指定视频的云端进度（秒），未找到或未登录返回 0。
+   * 优先查首页；若首页未命中则翻页最多 5 页。
+   */
+  suspend fun getCloudProgress(bvid: String): Int {
+    if (bvid.isBlank()) return 0
+    val sessData = sessionStore.sessData.first()
+    if (sessData.isNullOrBlank()) return 0
+
+    var viewAt = 0L
+    var max = 0L
+    var pages = 0
+    while (pages < 5) {
+      val root = apiClient.getJson(
+        url = BiliApiEndpoints.HistoryCursor,
+        params = buildMap {
+          put("ps", HistoryLookupPageSize.toString())
+          if (viewAt > 0L) put("view_at", viewAt.toString())
+          if (max > 0L) put("max", max.toString())
+        },
+        sessData = sessData,
+      ).rootObject()
+      val code = root.int("code")
+      if (code != 0) break
+      val data = root.obj("data") ?: break
+      val list = data["list"] as? kotlinx.serialization.json.JsonArray ?: break
+      for (element in list) {
+        val item = element.asObjectOrNull() ?: continue
+        val history = item.obj("history")
+        val itemBvid = history?.string("bvid").orEmpty()
+        if (itemBvid == bvid) {
+          return item.int("progress").takeIf { it > 0 } ?: 0
+        }
+      }
+      val cursor = data.obj("cursor") ?: break
+      val nextViewAt = cursor.long("view_at")
+      val nextMax = cursor.long("max")
+      if (nextViewAt <= 0L && nextMax <= 0L) break
+      viewAt = nextViewAt
+      max = nextMax
+      pages++
+    }
+    return 0
+  }
+
   suspend fun getVideoMetadata(request: PlaybackRequest): PlaybackVideoMetadata {
     val root = apiClient.getJson(
       url = BiliApiEndpoints.View,
@@ -151,6 +196,7 @@ class PlaybackRepository(
       danmakuCount = BiliNumberParser.toInt(stat?.get("danmaku")),
       pubdate = data.long("pubdate"),
       pages = pages,
+      historyProgressSeconds = data.obj("history")?.int("progress")?.coerceAtLeast(0) ?: 0,
     )
   }
 
@@ -242,6 +288,50 @@ class PlaybackRepository(
         biliJct = biliJct,
       ).rootObject()
       root.requireBiliCodeOk("player heartbeat")
+      true
+    }.getOrDefault(false)
+  }
+
+  /**
+   * 上报视频观看进度到 B 站历史记录 ([BiliApiEndpoints.HistoryReport]).
+   *
+   * 与 [reportProgress]（心跳）不同，此接口持久化保存观看进度到用户的历史记录，
+   * 使得用户在其它设备上能看到"看到 xx 分钟"的进度。
+   *
+   * @param aid 视频 aid（必须 > 0）
+   * @param cid 视频 cid（必须 > 0）
+   * @param progressSeconds 观看进度，单位：**秒**
+   * @param type 投稿类型，3=普通视频，可选
+   * @param platform 平台标识，默认 "android"
+   * @return true 上报成功，false 因未登录或网络失败
+   */
+  suspend fun reportHistory(
+    aid: Long,
+    cid: Long,
+    progressSeconds: Int,
+    type: Int = 3,
+    platform: String = "android",
+  ): Boolean {
+    if (aid <= 0L || cid <= 0L) return false
+    val sessData = sessionStore.sessData.first()
+    val biliJct = sessionStore.biliJct.first()
+    if (sessData.isNullOrBlank() || biliJct.isNullOrBlank()) return false
+
+    return runCatching {
+      val root = apiClient.postFormJson(
+        url = BiliApiEndpoints.HistoryReport,
+        params = mapOf(
+          "aid" to aid.toString(),
+          "cid" to cid.toString(),
+          "progress" to progressSeconds.toString(),
+          "type" to type.toString(),
+          "platform" to platform,
+          "csrf" to biliJct,
+        ),
+        sessData = sessData,
+        biliJct = biliJct,
+      ).rootObject()
+      root.requireBiliCodeOk("history report")
       true
     }.getOrDefault(false)
   }
@@ -414,5 +504,6 @@ class PlaybackRepository(
     const val FnvalH265 = 64
     const val FnvalAv1 = 1024
     const val PlaybackLogTag = "BiliTVNative:Playback"
+    const val HistoryLookupPageSize = 20
   }
 }

@@ -26,8 +26,8 @@ android {
     applicationId = "com.kirin.bilitv"
     minSdk = 23
     targetSdk = 36
-    versionCode = 101
-    versionName = "1.0.1"
+    versionCode = 110
+    versionName = "1.1.0"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
     ndk {
@@ -39,6 +39,7 @@ android {
 
   buildTypes {
     debug {
+      applicationIdSuffix = ".mod"
       isMinifyEnabled = false
       isShrinkResources = false
     }
