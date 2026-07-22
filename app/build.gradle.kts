@@ -39,7 +39,7 @@ android {
 
   buildTypes {
     debug {
-      applicationIdSuffix = ".kirinmod"
+      applicationIdSuffix = ".mod"
       isMinifyEnabled = false
       isShrinkResources = false
     }
