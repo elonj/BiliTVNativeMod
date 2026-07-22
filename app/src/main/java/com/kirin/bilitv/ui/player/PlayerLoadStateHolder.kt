@@ -100,8 +100,14 @@ internal class PlayerLoadStateHolder(
       val requestedStartPositionMs = if (resolvedRequest.preferredQualityId != null || resolvedRequest.forceStartPosition) {
         resolvedRequest.startPositionMs
       } else {
-        playbackRepository.getSavedProgress(info.bvid, info.cid)?.positionMs
-          ?: resolvedRequest.startPositionMs
+        // 优先级：云端进度（历史游标）> 本地进度（本 TV）> 默认
+        val cloudProgressSeconds = playbackRepository.getCloudProgress(info.bvid)
+        if (cloudProgressSeconds > 0) {
+          cloudProgressSeconds * 1000L
+        } else {
+          playbackRepository.getSavedProgress(info.bvid, info.cid)?.positionMs
+            ?: resolvedRequest.startPositionMs
+        }
       }
       val readyState = PlayerScreenState.Ready(
         info = info,
